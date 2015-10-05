@@ -14,6 +14,8 @@ from urlparse import urlsplit
 from optparse import OptionParser
 
 import pymongo
+from pymongo import MongoClient
+
 import jinja2
 import feedparser
 
@@ -28,15 +30,17 @@ parsed = urlsplit(mongodb_url)
 db_name = parsed.path[1:]
 if not db_name:
     db_name = 'neko'
-connection = pymongo.Connection(mongodb_url)
-db = pymongo.Connection(mongodb_url)[db_name]
+
+client = MongoClient(mongodb_url)
+db = client[db_name]
+
 if '@' in mongodb_url:
     user_pass = parsed.netloc.split('@')[0].split(':')
     db.authenticate(user_pass[0], user_pass[1])
 
 
 def import_opml(opml_file):
-    tree = ElementTree()    
+    tree = ElementTree()
     tree.parse(opml_file)
     outlines = tree.findall(".//outline")
     tag = None
@@ -56,20 +60,20 @@ def import_opml(opml_file):
                     'title': o.attrib['text'],
                     'url': o.attrib['xmlUrl'],
                     'web_url': o.attrib['htmlUrl'],
-                    'tag': tag,                
+                    'tag': tag,
                     }
                 db.feeds.update({'url': f['url']}, f, True)
             except:
                 pass
-                
+
 
 def update():
-    db.items.ensure_index('url')    
+    db.items.ensure_index('url')
     feeds = db.feeds.find({})
     pool = multiprocessing.Pool(processes=5)
     result = pool.map_async(crawl_feed, feeds)
     result.wait(300)
-    
+
 
 
 def crawl_feed(feed):
@@ -81,7 +85,7 @@ def crawl_feed(feed):
         print "updating " + feed['title']
     except:
         pass
-    
+
     db.feeds.update({'url': feed['url']}, feed, True)
 
     for feed_item in parsed.entries:
@@ -89,17 +93,17 @@ def crawl_feed(feed):
             process_feed_item(feed_item, feed)
         except:
             print 'problem inserting'
-        
+
 
 def process_feed_item(feed_item, feed):
 #    print 'inserting %s' % feed_item.link
-    
+
     if(db.items.find({'url': feed_item.link}).count() > 0):
         # print 'already there, done'
         # TODO handle updates
         return
 
-    
+
     i = {
         # DO BETTER STUFF
         '_id': str(uuid.uuid1()),
@@ -120,8 +124,8 @@ def process_feed_item(feed_item, feed):
         i['date'] = datetime.now()
 
     db.items.insert(i)
-   
-            
+
+
 def main():
 
     usage ='nekko.py update | reset | import [opml_file]'
@@ -156,4 +160,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

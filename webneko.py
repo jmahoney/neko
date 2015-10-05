@@ -12,13 +12,11 @@ import uuid
 import calendar
 import requests
 from urlparse import urlsplit
-import bleach
 from xml.etree.ElementTree import ElementTree
+from pymongo import MongoClient
 
 SECRET_USERNAME = 'username'
 SECRET_PASSWORD = 'password'
-
-
 
 try:
     with open('auth', 'r') as f:
@@ -27,7 +25,7 @@ try:
 except:
     print 'no valid auth file found'
     SECRET_USERNAME = os.getenv('NEKO_USERNAME', 'username')
-    SECRET_PASSWORD = os.getenv('NEKO_PASSWORD', 'password')    
+    SECRET_PASSWORD = os.getenv('NEKO_PASSWORD', 'password')
     # sys.exit()
 
 app = flask.Flask(__name__)
@@ -39,12 +37,14 @@ parsed = urlsplit(mongodb_url)
 db_name = parsed.path[1:]
 if not db_name:
     db_name = 'neko'
-connection = pymongo.Connection(mongodb_url)
-db = pymongo.Connection(mongodb_url)[db_name]
+
+client = MongoClient(mongodb_url)
+db = client[db_name]
+
 if '@' in mongodb_url:
     user_pass = parsed.netloc.split('@')[0].split(':')
     db.authenticate(user_pass[0], user_pass[1])
-    
+
 env = jinja2.Environment(loader=jinja2.FileSystemLoader(['templates'], encoding='utf-8'))
 
 
@@ -75,7 +75,7 @@ def handler(obj):
         return obj.isoformat()
 #    elif isinstance(obj, ...):
 #        return ...
-    else:        
+    else:
         return datetime.datetime.now().isoformat()
         raise TypeError, 'Object of type %s with value of %s is not JSON serializable' % (type(obj), repr(obj))
 
@@ -118,7 +118,7 @@ def boot():
     else:
         print 'invalid autho'
         boot_template = 'static/public.html'
-        
+
     with open(boot_template, 'r') as f:
         out = f.read()
     return out
@@ -126,7 +126,7 @@ def boot():
 
 @app.route('/tag/<tag>/')
 def tagged_items(tag):
-    page = int(flask.request.args.get('page', 1))    
+    page = int(flask.request.args.get('page', 1))
     items = db.items.find({'tag': tag}).sort('date', direction=pymongo.DESCENDING)[:20]
     return show_items(items, page)
 
@@ -145,7 +145,7 @@ def get_tags():
     for tag in tags.keys():
         if tag:
             tags_list.append({'name':tag, 'unread': tags[tag]})
-        
+
     return tags_list
 
 
@@ -162,14 +162,14 @@ def stream(tag=None, starred=False):
     if(search_term):
 
         find_filter['description'] = {'$regex': search_term}
-    
+
     if(before_date):
         try:
             find_filter['date'] = {'$lt': datetime.datetime.strptime( before_date, "%Y-%m-%dT%H:%M:%S" )}
         except:
             # maybe it has ms?
             find_filter['date'] = {'$lt': datetime.datetime.strptime( before_date, "%Y-%m-%dT%H:%M:%S.%f" )}
-            
+
     if(tag):
         find_filter['feed.tag'] = tag
 
@@ -188,11 +188,10 @@ def stream(tag=None, starred=False):
 
     db.items.ensure_index([("date", pymongo.DESCENDING)])
 
-    items = db.items.find(find_filter).sort("date", direction=pymongo.DESCENDING)[(page-1)*PER_PAGE:page*PER_PAGE]    
+    items = db.items.find(find_filter).sort("date", direction=pymongo.DESCENDING)[(page-1)*PER_PAGE:page*PER_PAGE]
     items_array = []
 
     for i in items:
-        i['description'] = bleach.clean(i['description'], tags=['blockquote', 'a', 'img', 'p', 'h1', 'h2', 'h3', 'h4', 'b', 'i', 'em' 'strong'], attributes = { 'a': ['href'], 'img': ['src', 'alt'] }, strip=True)
         items_array.append(i)
     x = json.dumps(items_array, default=handler)
     return flask.make_response(x)
@@ -221,7 +220,7 @@ def feeds():
     feeds_array = []
     for f in feeds:
         feeds_array.append(f)
-        
+
     x = json.dumps(feeds_array, default=handler)
 
     return flask.make_response(json.dumps(feeds_array, default=handler))
@@ -237,7 +236,7 @@ def create_feed():
         'tag': 'new'
         }
     print 'inserting new feed:', f
-    db.feeds.insert(f)    
+    db.feeds.insert(f)
     return flask.jsonify({'feed': f});
 
 
@@ -268,7 +267,7 @@ def update_item():
         s = flask.request.json['starred']
     except:
         s = False
-        
+
 
     db.items.update({'_id': flask.request.json['_id']}, {"$set": {'read': r, 'starred': s}})
     return flask.jsonify(flask.request.json)
@@ -283,7 +282,7 @@ def opml_import():
         print 'Importing!'
         opml_file = request.files['opml']
 
-        tree = ElementTree()    
+        tree = ElementTree()
         tree.parse(opml_file)
         outlines = tree.findall(".//outline")
         tag = None
@@ -303,7 +302,7 @@ def opml_import():
                         'title': o.attrib['text'],
                         'url': o.attrib['xmlUrl'],
                         'web_url': o.attrib['htmlUrl'],
-                        'tag': tag,                
+                        'tag': tag,
                     }
                     db.feeds.update({'url': f['url']}, f, True)
                 except:
